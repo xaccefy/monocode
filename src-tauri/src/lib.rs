@@ -361,7 +361,10 @@ pub fn run() {
             // ⌘Q is a separate menu handler and arrives with an exit code.
             // Windows has no dock, so the last close is a quit.
             if code.is_none() {
-                #[cfg(target_os = "windows")]
+                // Stay in the dock on macOS; on every other platform the last
+                // window close is a real quit. Lingering invisibly breaks
+                // window-state persistence (RunEvent::Exit never fires).
+                #[cfg(not(target_os = "macos"))]
                 window::request_quit(handle);
                 return;
             }

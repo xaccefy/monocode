@@ -38,6 +38,9 @@ pub fn open_new_window(app: &AppHandle) -> Result<(), String> {
         let _ = window.set_shadow(true);
     }
 
+    // Config ships `visible: false`; show only after geometry is settled so
+    // the window never appears at one size/position and teleports.
+    let _ = window.show();
     let _ = window.set_focus();
     Ok(())
 }
