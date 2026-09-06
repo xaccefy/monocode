@@ -421,7 +421,7 @@ function EmptyState() {
             ),
           )}
         </div>
-        <div className="absolute grid size-14 place-items-center rounded-2xl bg-content/6 backdrop-blur-sm">
+        <div className="absolute grid size-14 place-items-center rounded-2xl bg-background-base/80">
           <Search className="size-6 text-content/50" strokeWidth={1.75} />
         </div>
       </div>

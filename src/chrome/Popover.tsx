@@ -57,7 +57,7 @@ type Props = Omit<ComponentPropsWithoutRef<"div">, "style"> & {
 const FRAME =
   "isolate overflow-hidden rounded-xl border border-content/10 bg-background-base shadow-xl";
 const BACKDROP =
-  "pointer-events-none absolute inset-0 z-0 bg-content/10 backdrop-blur-xl [backface-visibility:hidden] [transform:translateZ(0)]";
+  "pointer-events-none absolute inset-0 z-0 bg-content/10 [backface-visibility:hidden] [transform:translateZ(0)]";
 // NOTE: FRAME must stay opaque (bg-background-base). The backdrop blur is only
 // progressive enhancement — Linux WebKit builds (AppImage) don't support
 // backdrop-filter, so a translucent-only frame renders see-through there.

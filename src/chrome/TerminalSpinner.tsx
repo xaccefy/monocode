@@ -21,11 +21,19 @@ export function TerminalSpinner({
   const [frame, setFrame] = useState(0);
 
   useEffect(() => {
+    if (document.hidden) return;
     const id = window.setInterval(
       () => setFrame((n) => (n + 1) % FRAMES.length),
       80,
     );
-    return () => window.clearInterval(id);
+    const onVisible = () => {
+      if (document.hidden) window.clearInterval(id);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, []);
 
   return (

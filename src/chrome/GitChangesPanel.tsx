@@ -60,7 +60,7 @@ import { MOD } from "../lib/platform";
 import { applyProjectDiffStats } from "../hooks/useProjectDiffStats";
 import { useLockOverscroll } from "../hooks/useLockOverscroll";
 
-const GIT_POLL_MS = 2000;
+const GIT_POLL_MS = 4000;
 
 function confirmNative(message: string, okLabel?: string): Promise<boolean> {
   return ask(message, {

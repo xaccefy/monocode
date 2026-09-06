@@ -29,6 +29,7 @@ const GHOST_OPACITY = 0.8;
 const SPRITE_SCALE = 0.8;
 /** How hard the bubble chases its speaker; sprites move cell by cell. */
 const BUBBLE_EASE = 0.2;
+/** 30fps cap: half the rAF budget, plenty for sprites, half the paint work. */
 const FRAME_MS = 33;
 
 const HEADING: Record<string, { x: number; y: number }> = {
@@ -579,7 +580,7 @@ export function TerminalGridBackground() {
               tabIndex={-1}
               onMouseDown={(event) => event.preventDefault()}
               onClick={takeControl}
-              className="pointer-events-none flex cursor-pointer items-center gap-2 border border-content/25 bg-background-base/80 px-3 py-1.5 font-mono text-[11px] tracking-[0.16em] text-content/85 shadow-lg backdrop-blur-sm group-hover:pointer-events-auto hover:border-content/45 hover:bg-content/10 hover:text-content"
+              className="pointer-events-none flex cursor-pointer items-center gap-2 border border-content/25 bg-background-base/80 px-3 py-1.5 font-mono text-[11px] tracking-[0.16em] text-content/85 shadow-lg group-hover:pointer-events-auto hover:border-content/45 hover:bg-content/10 hover:text-content"
             >
               <span className="text-content/40">[</span>
               take control

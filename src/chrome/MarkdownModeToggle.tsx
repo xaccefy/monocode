@@ -34,7 +34,7 @@ export function MarkdownModeToggle({ mode, onChange }: ToggleProps) {
     <div
       role="tablist"
       aria-label="Markdown view"
-      className="flex rounded-md border border-content/10 bg-content/10 p-0.5 backdrop-blur-md"
+      className="flex rounded-md border border-content/10 bg-background-base p-0.5"
     >
       <ModeTab
         label="Preview"
