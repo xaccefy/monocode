@@ -35,7 +35,6 @@ import {
   zoomInUiScale,
   zoomOutUiScale,
 } from "./lib/uiScale";
-import { runUpdateFlow } from "./lib/updater";
 import { displayAttachments, prepareAttachments } from "./lib/attachments";
 import {
   basename,
@@ -354,7 +353,6 @@ import {
   collectWorkspaceSnapshot,
   workspaceSnapshotKey,
 } from "./lib/workspaceSnapshot";
-import type { InstalledUpdate } from "./lib/updateNotice";
 import {
   bindResumedSessions,
   closeBusyWindow,
@@ -537,13 +535,11 @@ registerBuiltinHarnesses();
 export default function App({
   windowTransfer = null,
   resumed = null,
-  installedUpdate = null,
   history: bootHistory = [],
   historyCwd: bootHistoryCwd = null,
 }: {
   windowTransfer?: WindowTransferPayload | null;
   resumed?: ResumedWorkspace | null;
-  installedUpdate?: InstalledUpdate | null;
   history?: SessionSummary[];
   historyCwd?: string | null;
 }) {
@@ -618,7 +614,6 @@ export default function App({
     () => true,
   );
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [updateNotice, setUpdateNotice] = useState(installedUpdate);
   const [whatsNewVersion, setWhatsNewVersion] = useState<string | null>(null);
   const [settingsSection, setSettingsSection] =
     useState<SettingsSectionId>(loadSettingsSection);
@@ -4843,9 +4838,6 @@ export default function App({
       listen("open_inbox", () => actions.current.onOpenInbox()),
       listen("open_notes", () => actions.current.onOpenNotes()),
       listen("open_settings", () => actions.current.openSettings()),
-      listen("check_for_updates", () => {
-        void runUpdateFlow(true);
-      }),
       listen("sidebar_opacity", () => {
         actions.current.openSettings("appearance");
       }),
@@ -4991,9 +4983,6 @@ export default function App({
         onOpenSettings={onOpenSettings}
         onSelectSettingsSection={onSelectSettingsSection}
         onCloseSettings={onCloseSettings}
-        updateNotice={updateNotice}
-        onOpenWhatsNew={onOpenWhatsNew}
-        onDismissUpdate={() => setUpdateNotice(null)}
       />
 
       <div className="body-glass flex min-h-0 min-w-0 flex-1 flex-col">

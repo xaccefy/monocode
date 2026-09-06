@@ -1,8 +1,5 @@
 import {
-  ArrowDownCircle,
   Check,
-  Loader,
-  RefreshCw,
   RotateCcw,
   Search,
 } from "../chrome/icons";
@@ -154,12 +151,7 @@ import {
   saveNotificationsEnabled,
   type NotificationPermission,
 } from "../lib/notifications";
-import {
-  installPendingUpdate,
-  readAppVersion,
-  runUpdateFlow,
-  type UpdaterSnapshot,
-} from "../lib/updater";
+import { getVersion } from "@tauri-apps/api/app";
 
 type Props = {
   section: SettingsSectionId;
@@ -509,7 +501,7 @@ function GeneralPage({
       <LinearSettings />
 
       <Heading title="About" />
-      <UpdateRow onOpenWhatsNew={onOpenWhatsNew} />
+      <AboutRow onOpenWhatsNew={onOpenWhatsNew} />
     </>
   );
 }
@@ -670,52 +662,26 @@ function LinearSettings() {
   );
 }
 
-function UpdateRow({
+function AboutRow({
   onOpenWhatsNew,
 }: {
   onOpenWhatsNew: (version: string) => void;
 }) {
-  const [snapshot, setSnapshot] = useState<UpdaterSnapshot>({
-    phase: "idle",
-    currentVersion: "…",
-  });
+  const [version, setVersion] = useState("…");
 
   useEffect(() => {
     let cancelled = false;
-    void readAppVersion().then((currentVersion) => {
-      if (cancelled) return;
-      setSnapshot((current) => ({ ...current, currentVersion }));
-    });
+    void getVersion().then(
+      (currentVersion) => {
+        if (cancelled) return;
+        setVersion(currentVersion);
+      },
+      () => {},
+    );
     return () => {
       cancelled = true;
     };
   }, []);
-
-  const busy =
-    snapshot.phase === "checking" || snapshot.phase === "downloading";
-  const hasUpdate = snapshot.phase === "available";
-
-  const onClick = async () => {
-    if (busy) return;
-    if (hasUpdate) {
-      await installPendingUpdate(setSnapshot);
-      return;
-    }
-    await runUpdateFlow(true, setSnapshot);
-  };
-
-  const status =
-    snapshot.phase === "available"
-      ? `Version ${snapshot.availableVersion} is available.`
-      : snapshot.phase === "downloading"
-        ? `Downloading${snapshot.progress != null ? ` ${snapshot.progress}%` : "…"}`
-        : snapshot.phase === "checking"
-          ? "Checking for updates…"
-          : snapshot.phase === "current"
-            ? "You're on the latest version."
-            : snapshot.phase === "error"
-              ? (snapshot.error ?? "Update check failed.")
-              : "MonoCode updates itself from the release feed.";
 
   return (
     <Row
@@ -723,28 +689,18 @@ function UpdateRow({
         <span className="flex items-baseline gap-2">
           Version
           <span className="font-mono text-[12px] text-content/45">
-            {snapshot.currentVersion}
+            {version}
           </span>
         </span>
       }
-      description={status}
+      description="Personal fork build. Grab new releases from your fork's GitHub releases page."
     >
       <div className="flex items-center gap-2">
         <SecondaryButton
-          onClick={() => onOpenWhatsNew(snapshot.currentVersion)}
-          disabled={snapshot.currentVersion === "…"}
+          onClick={() => onOpenWhatsNew(version)}
+          disabled={version === "…"}
         >
           What's new
-        </SecondaryButton>
-        <SecondaryButton onClick={() => void onClick()} disabled={busy}>
-          {busy ? (
-          <Loader className="size-3.5 animate-spin" aria-hidden />
-        ) : hasUpdate ? (
-          <ArrowDownCircle className="size-3.5 text-accent" aria-hidden />
-        ) : (
-          <RefreshCw className="size-3.5" strokeWidth={1.75} aria-hidden />
-        )}
-          {hasUpdate ? "Download" : "Check for updates"}
         </SecondaryButton>
       </div>
     </Row>

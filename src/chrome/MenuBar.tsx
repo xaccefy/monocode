@@ -2,7 +2,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ExplorerMenu, type ExplorerMenuItem } from "./ExplorerMenu";
 import { ALT, MOD, SHIFT } from "../lib/platform";
-import { runUpdateFlow } from "../lib/updater";
 
 type MenuKey = "file" | "view" | "terminal";
 
@@ -150,9 +149,6 @@ export function MenuBar({
         case "toggle_diff":
           onShowSourceControl?.();
           break;
-        case "check_for_updates":
-          void runUpdateFlow(true);
-          break;
         case "zoom_in":
           onZoomIn?.();
           break;
@@ -205,8 +201,6 @@ export function MenuBar({
             label: "Close Other Tabs",
             shortcut: `${MOD}${ALT}T`,
           },
-          { kind: "sep" },
-          { kind: "item", id: "check_for_updates", label: "Check for Updates…" },
         ];
       case "view":
         return [

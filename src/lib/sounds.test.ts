@@ -11,7 +11,6 @@ vi.mock("cuelume", () => ({
 }));
 
 import {
-  announceUpdateAvailable,
   loadSoundsEnabled,
   noteInboxUnseen,
   playCue,
@@ -82,8 +81,6 @@ describe("sounds", () => {
     expect(play).toHaveBeenCalledWith("success");
     playCue("inboxUnseen");
     expect(play).toHaveBeenCalledWith("bloom");
-    playCue("updateAvailable");
-    expect(play).toHaveBeenCalledWith("arrival");
     playCue("switch");
     expect(play).toHaveBeenCalledWith("toggle");
     playCue("copy");
@@ -111,16 +108,6 @@ describe("sounds", () => {
     expect(play).toHaveBeenCalledTimes(1);
     noteInboxUnseen(false);
     noteInboxUnseen(true);
-    expect(play).toHaveBeenCalledTimes(2);
-  });
-
-  it("dings once per update version", () => {
-    announceUpdateAvailable("0.2.0");
-    expect(play).toHaveBeenCalledTimes(1);
-    expect(play).toHaveBeenCalledWith("arrival");
-    announceUpdateAvailable("0.2.0");
-    expect(play).toHaveBeenCalledTimes(1);
-    announceUpdateAvailable("0.2.1");
     expect(play).toHaveBeenCalledTimes(2);
   });
 });

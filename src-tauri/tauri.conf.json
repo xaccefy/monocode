@@ -40,7 +40,6 @@
     }
   },
   "bundle": {
-    "createUpdaterArtifacts": true,
     "active": true,
     "targets": "all",
     "icon": [
@@ -56,12 +55,6 @@
     "macOS": {
       "entitlements": "Entitlements.plist",
       "signingIdentity": "-"
-    }
-  },
-  "plugins": {
-    "updater": {
-      "pubkey": "",
-      "endpoints": []
     }
   }
 }

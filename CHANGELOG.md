@@ -11,6 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Settings: Notifications, off by default. With it on, a system notification appears when a turn finishes or an agent waits on an approval or question in a session that is not on screen, whether MonoCode is in the background or another session is open; clicking it jumps to that session. Turning it on asks macOS for permission, and a blocked state links to System Settings. The Sounds setting decides whether the notification plays a sound, and the in-app cue is skipped when the banner fires.
 
+### Fixed
+
+- Popover menus (model picker and others) render on an opaque background instead of relying on backdrop blur, fixing a see-through menu on Linux AppImage builds where backdrop-filter is unsupported.
+
+### Removed
+
+- In-app auto-updater (plugin, update checks, and release signing feed). This fork ships manual builds; grab new releases from the fork's GitHub releases page. The version row in Settings → General keeps a What's new shortcut.
+
 ## [0.1.34] - 2026-09-05
 
 ### Added

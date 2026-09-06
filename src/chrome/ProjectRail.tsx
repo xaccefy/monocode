@@ -65,8 +65,6 @@ import { ProjectMascot } from "./ProjectMascot";
 import { RailAction, RailSearch } from "./RailAction";
 import { RemoveProjectDialog } from "./RemoveProjectDialog";
 import { DevModeSlot, TabVisitNav } from "./TitleBar";
-import { SidebarUpdateFooter } from "./SidebarUpdate";
-import type { InstalledUpdate } from "../lib/updateNotice";
 import { SettingsNav } from "./SettingsRail";
 import { Shimmer } from "../surfaces/Shimmer";
 import { TabGroupMenu, type TabGroupMenuExtraItem } from "./TabGroupMenu";
@@ -126,9 +124,6 @@ type Props = {
   onOpenSettings?: () => void;
   onSelectSettingsSection?: (section: SettingsSectionId) => void;
   onCloseSettings?: () => void;
-  updateNotice?: InstalledUpdate | null;
-  onOpenWhatsNew?: (version: string) => void;
-  onDismissUpdate?: () => void;
 };
 
 export function ProjectRail({
@@ -159,9 +154,6 @@ export function ProjectRail({
   onOpenSettings,
   onSelectSettingsSection,
   onCloseSettings,
-  updateNotice = null,
-  onOpenWhatsNew,
-  onDismissUpdate,
 }: Props) {
   const resize = useDragResize({
     min: PROJECT_RAIL_WIDTH_MIN,
@@ -467,12 +459,7 @@ export function ProjectRail({
             groupCustomColors={groupCustomColors}
             groupMascots={groupMascots}
           />
-          <SidebarUpdateFooter
-            update={updateNotice}
-            onOpenWhatsNew={onOpenWhatsNew}
-            onDismissUpdate={onDismissUpdate}
-          />
-          <div className="flex shrink-0 flex-col gap-px p-2 pt-0">
+          <div className="flex shrink-0 flex-col gap-px p-2">
             <RailAction
               label="Settings"
               icon={Settings}
