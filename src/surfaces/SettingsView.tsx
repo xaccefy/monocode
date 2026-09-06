@@ -15,7 +15,6 @@ import {
 import { HarnessIcon } from "../chrome/HarnessIcon";
 import { InboxProviderMark } from "../chrome/InboxProviderMark";
 import { RemoveProjectDialog } from "../chrome/RemoveProjectDialog";
-import { WindowControls } from "../chrome/WindowControls";
 import { useLockOverscroll } from "../hooks/useLockOverscroll";
 import {
   applyBodyGlass,
@@ -171,7 +170,6 @@ export function SettingsView({
   section,
   cwd,
   sessions,
-  besideRail = false,
   onClose,
   onOpenSession,
   onArchiveSession,
@@ -207,7 +205,6 @@ export function SettingsView({
         className="flex h-10 shrink-0 select-none items-center border-b border-content/10"
         data-tauri-drag-region="deep"
       >
-        {IS_MAC && !besideRail ? <div className="w-[78px] shrink-0" /> : null}
         <div className="flex min-w-0 flex-1 items-center gap-2 px-3 text-[13px]">
           <span className="shrink-0 text-content/45">Settings</span>
           <span aria-hidden className="shrink-0 text-content/25">
@@ -228,7 +225,6 @@ export function SettingsView({
             Restore defaults
           </button>
         ) : null}
-        {IS_MAC ? null : <WindowControls />}
       </div>
 
       <div

@@ -120,10 +120,8 @@ html.has-native-glass .sidebar-glass {
   background: var(--color-background-base);
 }
 
-.transcript-turn {
-  content-visibility: auto;
-  contain-intrinsic-block-size: auto 240px;
-}
+/* content-visibility removed: on WebKitGTK it mis-estimates offscreen turn
+ * heights and every scroll jumps as turns render. Native scroll first. */
 
 /*
  * The live turn is still growing. Size containment would flash the 240px

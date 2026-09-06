@@ -30,8 +30,7 @@ import { FileTypeIcon } from "./FileTypeIcon";
 import { HarnessIcon } from "./HarnessIcon";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { TerminalSpinner } from "./TerminalSpinner";
-import { WindowControls } from "./WindowControls";
-import { IS_MAC, MOD } from "../lib/platform";
+import { MOD } from "../lib/platform";
 import type { RecentProject } from "../lib/recents";
 
 export type Tab = {
@@ -353,7 +352,7 @@ function TabStripChevron({
       data-tauri-drag-region="false"
       onPointerDown={(event) => event.stopPropagation()}
       onClick={onClick}
-      className={`absolute top-1/2 z-40 grid size-6.5 -translate-y-1/2 place-items-center rounded-md bg-content/10 backdrop-blur-xl text-content/70 hover:bg-content/15 hover:text-content ${
+      className={`absolute top-1/2 z-40 grid size-6.5 -translate-y-1/2 place-items-center rounded-md bg-surface border border-content/10 text-content/70 hover:bg-content/15 hover:text-content ${
         side === "left" ? "left-1" : "right-1"
       }`}
     >
@@ -544,7 +543,7 @@ function TitleBarComponent({
     const el = tabStripRef.current;
     if (!el) return;
     const amount = Math.max(el.clientWidth * 0.6, 112);
-    el.scrollBy({ left: direction * amount, behavior: "smooth" });
+    el.scrollBy({ left: direction * amount });
   }, []);
   const activeTabRef = useRef<HTMLDivElement | null>(null);
   const canDrag = tabs.length > 1;
@@ -654,24 +653,15 @@ function TitleBarComponent({
           </IconButton>
         ) : null}
       </div>
-      {!IS_MAC ? <WindowControls /> : null}
     </div>
   );
 
-  // "deep" drags from anywhere in the subtree. The bare attribute only drags
-  // on a direct hit, which left every label and spacer dead. Tauri still
-  // exempts buttons, links and inputs on its own.
+  // No window controls on Linux fork: Hyprland manages minimize/maximize/
+  // close. No drag region either, tiling WM handles moves.
   return (
-    <header
-      className="flex h-10 shrink-0 select-none items-stretch border-b border-content/10"
-      data-tauri-drag-region="deep"
-    >
-      {/* Both the rail and the sidebar step aside without a project, so the
-          title bar takes over the traffic lights and the rail toggle. */}
+    <header className="flex h-10 shrink-0 select-none items-stretch border-b border-content/10">
       {projectless && railClosed ? (
-        <>
-          <div className="w-[78px] shrink-0" />
-          <div className="flex shrink-0 items-center px-1.5">
+        <div className="flex shrink-0 items-center px-1.5">
             <IconButton
               label={`Toggle Sidebar (${MOD}B)`}
               onClick={onToggleSidebar}
@@ -679,7 +669,6 @@ function TitleBarComponent({
               <PanelLeft className="size-3.5" strokeWidth={1.75} />
             </IconButton>
           </div>
-        </>
       ) : null}
       {showProjectButton && onSelectProject ? (
         <CwdPicker
@@ -694,11 +683,7 @@ function TitleBarComponent({
         </CwdPicker>
       ) : null}
 
-      <div
-        className={`flex min-w-0 flex-1 items-stretch${
-          showProjectButton ? " border-l border-content/10" : ""
-        }`}
-      >
+      <div className="flex min-w-0 flex-1 items-stretch">
         <div
           className="relative h-full min-w-0 flex-1 overflow-hidden"
           onWheel={(event) => {
@@ -747,13 +732,6 @@ function TitleBarComponent({
           </div>
         </div>
 
-        {IS_MAC ? null : (
-          <div className="flex min-w-0 flex-1 items-center justify-center px-4">
-            <span className="pointer-events-none truncate text-[11.5px] font-medium text-content/40 select-none">
-              {systemTitle}
-            </span>
-          </div>
-        )}
         {trailingControls}
       </div>
     </header>

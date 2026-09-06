@@ -12,7 +12,6 @@ import { useMarkdownMode } from "../chrome/MarkdownModeToggle";
 import { ProjectLogoIcon } from "../chrome/ProjectLogoIcon";
 import { ProjectMascot } from "../chrome/ProjectMascot";
 import { OverlayNav } from "../chrome/TitleBar";
-import { WindowControls } from "../chrome/WindowControls";
 import { useDragResize } from "../hooks/useDragResize";
 import { useLockOverscroll } from "../hooks/useLockOverscroll";
 import { useTabGroupLogos } from "../hooks/useTabGroupLogos";
@@ -28,7 +27,6 @@ import {
   requestAddNoteToChat,
   type Note,
 } from "../lib/notes";
-import { IS_MAC } from "../lib/platform";
 import { looksLikeProject } from "../lib/recents";
 import {
   loadTabGroupColors,
@@ -282,7 +280,6 @@ export function NotesView({
         className="flex h-10 shrink-0 select-none items-center border-b border-content/10"
         data-tauri-drag-region="deep"
       >
-        {IS_MAC && !besideRail ? <div className="w-[78px] shrink-0" /> : null}
         {besideRail ? null : (
           <OverlayNav onBack={onClose} onToggleSidebar={onToggleSidebar} />
         )}
@@ -293,7 +290,6 @@ export function NotesView({
           />
           <span className="min-w-0 truncate text-content">Notes</span>
         </div>
-        {IS_MAC ? null : <WindowControls />}
       </div>
       <div className="flex min-h-0 min-w-0 flex-1">
         {list}

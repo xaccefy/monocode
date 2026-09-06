@@ -1,13 +1,17 @@
 import { useCallback, useRef } from "react";
+import { IS_MAC } from "../lib/platform";
 
-/** Stop macOS rubber-band bounce when a scroller reaches any edge. */
+/** Stop macOS rubber-band bounce when a scroller reaches any edge.
+ * No-op on Linux/Windows: CSS `overscroll-behavior: none` already handles
+ * chaining there, and the non-passive preventDefault kills kinetic scroll
+ * feel on WebKitGTK. */
 export function useLockOverscroll<T extends HTMLElement>() {
   const cleanup = useRef<(() => void) | null>(null);
 
   return useCallback((el: T | null) => {
     cleanup.current?.();
     cleanup.current = null;
-    if (!el) return;
+    if (!el || !IS_MAC) return;
 
     const onWheel = (e: WheelEvent) => {
       const canScrollX = el.scrollWidth > el.clientWidth + 1;
