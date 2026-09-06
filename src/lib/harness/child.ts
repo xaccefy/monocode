@@ -2,6 +2,34 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 type LinePayload = { sessionId: string; line: string };
+/** Batched: one event carries all lines collected in a ~16ms window. */
+type LinesPayload = {
+  sessionId: string;
+  lines: string[];
+  isStderr?: boolean;
+};
+
+function dispatchLines(
+  payload: LinesPayload | LinePayload,
+  isStderr: boolean,
+  lineHandlers: Map<string, (line: string) => void>,
+  buffer: Map<string, string[]>,
+) {
+  const { sessionId } = payload;
+  const handler = lineHandlers.get(sessionId);
+  const lines = "lines" in payload ? payload.lines : [payload.line];
+  if (handler) {
+    for (const line of lines) handler(line);
+    return;
+  }
+  const queued = buffer.get(sessionId) ?? [];
+  for (const line of lines) queued.push(line);
+  if (queued.length > MAX_BUFFERED) {
+    queued.splice(0, queued.length - MAX_BUFFERED);
+  }
+  buffer.set(sessionId, queued);
+  void isStderr;
+}
 type ExitPayload = { sessionId: string; code: number | null; pid?: number };
 type SsePayload = { sessionId: string; data: string };
 type SseEndPayload = { sessionId: string; error?: string | null };
@@ -70,20 +98,19 @@ function ensureBridge() {
   bridgeAttempt = attempt;
   const installation = Promise.all([
     register(
-      listen<LinePayload>("harness-stdout", (event) => {
-        const { sessionId, line } = event.payload;
-        const handler = lineHandlers.get(sessionId);
-        if (handler) {
-          handler(line);
-          return;
-        }
-        pushBounded(lineBuffer, sessionId, line);
+      listen<LinePayload | LinesPayload>("harness-stdout", (event) => {
+        dispatchLines(event.payload, false, lineHandlers, lineBuffer);
       }),
     ),
     register(
-      listen<LinePayload>("harness-stderr", (event) => {
-        const { sessionId, line } = event.payload;
-        stderrHandlers.get(sessionId)?.(line);
+      listen<LinePayload | LinesPayload>("harness-stderr", (event) => {
+        const { sessionId } = event.payload;
+        const lines =
+          "lines" in event.payload
+            ? event.payload.lines
+            : [event.payload.line];
+        const handler = stderrHandlers.get(sessionId);
+        if (handler) for (const line of lines) handler(line);
       }),
     ),
     register(

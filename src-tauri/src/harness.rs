@@ -6,9 +6,7 @@ use std::process::{ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
-use std::time::Duration;
-#[cfg(not(windows))]
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -25,9 +23,22 @@ const SSE_END_EVENT: &str = "harness-sse-end";
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)] // kept for single-line payload compatibility
 struct HarnessLine {
     session_id: String,
     line: String,
+}
+
+/// Many lines from one session in a single event. Frontier emits line-by-line
+/// would re-enter the WebView IPC per line; busy agents produce hundreds of
+/// lines per second and drown the renderer in one-event-per-line renders.
+/// The frontend still accepts single-line payloads for compatibility.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct HarnessLines {
+    session_id: String,
+    lines: Vec<String>,
+    is_stderr: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -306,6 +317,67 @@ pub fn harness_resolve_grok() -> Result<CursorBinary, String> {
         })
 }
 
+/// Drain a child's stdout/stderr and emit lines in batches.
+/// Collects up to `MAX_BATCH_LINES` or `MAX_BATCH_WAIT` of quiet, whichever
+/// comes first, so a chatty agent costs one IPC event per batch instead of
+/// one per line. Line boundaries are preserved; order across the two streams
+/// was never guaranteed to interleave anyway.
+const MAX_BATCH_LINES: usize = 200;
+const MAX_BATCH_WAIT: Duration = Duration::from_millis(16);
+
+fn pump_lines<R: std::io::Read>(pipe: R, app: &AppHandle, session_id: &str, is_stderr: bool) {
+    let mut reader = pipe;
+    let mut buf = [0u8; 8192];
+    let mut pending: Vec<String> = Vec::with_capacity(64);
+    let mut carry = String::new();
+    let mut last_flush = Instant::now();
+    loop {
+        match reader.read(&mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => {
+                carry.push_str(&String::from_utf8_lossy(&buf[..n]));
+                while let Some(pos) = carry.find('\n') {
+                    let line = carry[..pos].to_string();
+                    carry.drain(..pos + 1);
+                    pending.push(line);
+                    if pending.len() >= MAX_BATCH_LINES {
+                        flush_lines(app, session_id, &mut pending, is_stderr);
+                        last_flush = Instant::now();
+                    }
+                }
+                let waited = last_flush.elapsed();
+                if !pending.is_empty()
+                    && (waited >= MAX_BATCH_WAIT || carry.len() > 64 * 1024)
+                {
+                    flush_lines(app, session_id, &mut pending, is_stderr);
+                    last_flush = Instant::now();
+                }
+            }
+        }
+    }
+    // A trailing line without \n still belongs to the transcript.
+    if !carry.is_empty() {
+        pending.push(std::mem::take(&mut carry));
+    }
+    flush_lines(app, session_id, &mut pending, is_stderr);
+}
+
+fn flush_lines(app: &AppHandle, session_id: &str, pending: &mut Vec<String>, is_stderr: bool) {
+    if pending.is_empty() {
+        return;
+    }
+    let event = if is_stderr { STDERR_EVENT } else { STDOUT_EVENT };
+    let _ = app.emit(
+        event,
+        HarnessLines {
+            session_id: session_id.to_string(),
+            lines: std::mem::take(pending),
+            is_stderr,
+        },
+    );
+    *pending = Vec::with_capacity(64);
+}
+
 /// Bind an ephemeral loopback port for `opencode serve`.
 #[tauri::command]
 pub fn harness_free_port() -> Result<u16, String> {
@@ -384,31 +456,13 @@ pub fn harness_spawn(
     let stdout_app = app.clone();
     let stdout_id = session_id.clone();
     thread::spawn(move || {
-        for line in BufReader::new(stdout).lines() {
-            let Ok(line) = line else { break };
-            let _ = stdout_app.emit(
-                STDOUT_EVENT,
-                HarnessLine {
-                    session_id: stdout_id.clone(),
-                    line,
-                },
-            );
-        }
+        pump_lines(stdout, &stdout_app, &stdout_id, false);
     });
 
     let stderr_app = app.clone();
     let stderr_id = session_id.clone();
     thread::spawn(move || {
-        for line in BufReader::new(stderr).lines() {
-            let Ok(line) = line else { break };
-            let _ = stderr_app.emit(
-                STDERR_EVENT,
-                HarnessLine {
-                    session_id: stderr_id.clone(),
-                    line,
-                },
-            );
-        }
+        pump_lines(stderr, &stderr_app, &stderr_id, true);
     });
 
     let wait_app = app.clone();
