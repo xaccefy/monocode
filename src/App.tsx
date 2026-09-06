@@ -134,6 +134,7 @@ import {
   compactHarnessContext,
   forgetHarnessSession,
   generateHarnessTitle,
+  isHarnessAvailable,
   isLiveHarness,
   probeHarnessAvailability,
   refreshHarnessCatalogs,
@@ -240,6 +241,7 @@ import {
   type PlanStatus,
   type SecondOpinionMeta,
   type Session,
+  type SubagentResultMeta,
   type TurnIntent,
 } from "./lib/session";
 
@@ -310,6 +312,21 @@ import {
   turnReport,
   turnUserRequest,
 } from "./lib/secondOpinion";
+import {
+  SUBAGENT_MAX_CALLS_PER_ROOT,
+  buildSubagentDelegationPrompt,
+  buildSubagentResultPrompt,
+  buildSubagentTaskPrompt,
+  cancelActiveSubagentBlocks,
+  consumeSubagentDelegations,
+  failSubagentBlocksForRemovedChildren,
+  loadSubagentProfiles,
+  resolveSubagentTarget,
+  subagentSessionReport,
+  subagentStatusFromSession,
+  titleForAgent,
+  updateSubagentBlock,
+} from "./lib/subagents";
 import { PaneTree } from "./surfaces/PaneTree";
 import { ProjectTerminalDock } from "./surfaces/ProjectTerminalDock";
 import { SearchView } from "./surfaces/SearchView";
@@ -420,11 +437,13 @@ function scheduleHarnessFlush(run: () => void): ScheduledFlush {
 function userTurnCards(
   noteCard: NoteComposerCard | undefined,
   secondOpinion?: SecondOpinionMeta,
+  subagentResult?: SubagentResultMeta,
 ) {
-  if (!noteCard && !secondOpinion) return undefined;
+  if (!noteCard && !secondOpinion && !subagentResult) return undefined;
   return {
     ...(secondOpinion ? { secondOpinion } : {}),
     ...(noteCard ? { noteCard: noteCardMeta(noteCard) } : {}),
+    ...(subagentResult ? { subagentResult } : {}),
   };
 }
 
@@ -701,6 +720,11 @@ export default function App({
   const harnessFlush = useRef<ScheduledFlush | null>(null);
   const skipForgetSessionIds = useRef(new Set<string>());
   const importedSessionsApplied = useRef(false);
+  const subagentStartDispatching = useRef(new Set<string>());
+  const subagentResultDispatching = useRef(new Set<string>());
+  const completeSubagentChildTurnRef = useRef<(callId: string) => void>(
+    () => undefined,
+  );
 
   useEffect(() => {
     if (importedSessionsApplied.current) return;
@@ -2690,9 +2714,23 @@ export default function App({
               for (const file of closingFiles) next.delete(file.id);
               return next;
             });
-            sessionsRef.current = removal.sessions;
+            const survivingIds = new Set(
+              removal.sessions.map((session) => session.id),
+            );
+            const removedIds = new Set(
+              sessionsRef.current
+                .map((session) => session.id)
+                .filter((id) => !survivingIds.has(id)),
+            );
+            const settledSessions =
+              removedIds.size === 0
+                ? removal.sessions
+                : removal.sessions.map((session) =>
+                    failSubagentBlocksForRemovedChildren(session, removedIds),
+                  );
+            sessionsRef.current = settledSessions;
             tabsRef.current = removal.tabs;
-            setSessions(removal.sessions);
+            setSessions(settledSessions);
             setTabs(removal.tabs);
             if (removal.activeTabId !== activeTabIdRef.current) {
               activateTab(removal.activeTabId);
@@ -3306,6 +3344,9 @@ export default function App({
         intent?: TurnIntent;
         planBlockId?: string;
         buildTarget?: PlanBuildTarget;
+        displayText?: string;
+        subagentResult?: SubagentResultMeta;
+        suppressSubagents?: boolean;
       },
     ) => {
       if (removingSessionIds.current.has(sessionId)) return;
@@ -3347,6 +3388,14 @@ export default function App({
       const workCwd = sessionWorkCwd(current);
       const submittedText = intent === "build" ? "Build approved plan" : text;
       const rawCommand = isNativeCommandPrompt(submittedText, current.harness);
+      const allowSubagents =
+        intent === "default" &&
+        !rawCommand &&
+        !current.subagent &&
+        !options?.suppressSubagents &&
+        !options?.secondOpinion &&
+        !handoffCard &&
+        !current.pendingSwitch;
       const harnessText = rawCommand
         ? submittedText
         : composeNoteMessage(noteCard, submittedText);
@@ -3471,97 +3520,102 @@ export default function App({
         options?.secondOpinion ??
         (handoffCard ? handoffTurnCard(handoffCard) : undefined);
       const visibleText =
-        card?.kind === "handoff"
+        options?.displayText ??
+        (card?.kind === "handoff"
           ? submittedText
           : card
             ? SECOND_OPINION_TITLE
-            : submittedText;
-      const cards = rawCommand ? undefined : userTurnCards(noteCard, card);
+            : submittedText);
+      const cards = rawCommand
+        ? undefined
+        : userTurnCards(noteCard, card, options?.subagentResult);
       const live = isLiveHarness(current.harness);
       const queuedHandoff =
         live && !pendingSwitch ? pendingHandoff(current) : null;
+      const subagentsAllowedForTurn = allowSubagents && !queuedHandoff;
 
       if (pendingSwitch && current.busy) {
         void cancelHarnessTurn(pendingSwitch.from, sessionId);
       }
 
-      setSessions((prev) =>
-        prev.map((s) => {
-          if (s.id !== sessionId) return s;
-          const selected = options?.buildTarget
-            ? withPlanBuildTarget(s, options.buildTarget)
-            : s;
-          const titled = isFirstTurn ? titleSeed : selected.title;
-          let next: Session = {
-            ...selected,
-            inboxCard: rawCommand ? s.inboxCard : undefined,
-            noteCard: rawCommand ? s.noteCard : undefined,
-            handoffCard: rawCommand ? s.handoffCard : undefined,
+      const startedSessions = sessionsRef.current.map((s) => {
+        if (s.id !== sessionId) return s;
+        const selected = options?.buildTarget
+          ? withPlanBuildTarget(s, options.buildTarget)
+          : s;
+        const titled = isFirstTurn ? titleSeed : selected.title;
+        let next: Session = {
+          ...selected,
+          inboxCard: rawCommand ? s.inboxCard : undefined,
+          noteCard: rawCommand ? s.noteCard : undefined,
+          handoffCard: rawCommand ? s.handoffCard : undefined,
+        };
+        if (approvedPlan && intent === "build") {
+          next = {
+            ...next,
+            blocks: next.blocks.map((block) =>
+              block.id === approvedPlan.id
+                ? {
+                    ...block,
+                    plan: {
+                      ...(block.plan ?? { status: "ready" as const }),
+                      status: "building" as const,
+                      approvedText: block.text,
+                    },
+                  }
+                : block,
+            ),
           };
-          if (approvedPlan && intent === "build") {
-            next = {
-              ...next,
-              blocks: next.blocks.map((block) =>
-                block.id === approvedPlan.id
-                  ? {
-                      ...block,
-                      plan: {
-                        ...(block.plan ?? { status: "ready" as const }),
-                        status: "building" as const,
-                        approvedText: block.text,
-                      },
-                    }
-                  : block,
-              ),
-            };
-          }
-          if (options?.queuedMessageId) {
-            next = dequeueQueuedMessage(next, options.queuedMessageId);
-          }
-          if (!live) {
-            return {
-              ...next,
-              title: titled,
-              pendingSwitch: undefined,
-              busy: false,
-              blocks: [
-                ...next.blocks,
-                {
-                  id: crypto.randomUUID(),
-                  role: "user",
-                  text: visibleText,
-                  ...(visible.length > 0 ? { attachments: visible } : {}),
-                  ...cards,
-                },
-                {
-                  id: crypto.randomUUID(),
-                  role: "system",
-                  text: `${next.harness} is not connected yet — install and sign in to that provider, then retry.`,
-                },
-              ],
-            };
-          }
-          if (pendingSwitch) {
-            const sealed = stopStreaming({
-              ...next,
-              title: titled,
-              pendingSwitch: undefined,
-            });
-            return appendUser(
-              appendPreparingHandoff(sealed, pendingSwitch.from, next.harness),
-              visibleText,
-              visible,
-              cards,
-            );
-          }
+        }
+        if (options?.queuedMessageId) {
+          next = dequeueQueuedMessage(next, options.queuedMessageId);
+        }
+        if (!live) {
+          return {
+            ...next,
+            title: titled,
+            pendingSwitch: undefined,
+            busy: false,
+            blocks: [
+              ...next.blocks,
+              {
+                id: crypto.randomUUID(),
+                role: "user" as const,
+                text: visibleText,
+                ...(visible.length > 0 ? { attachments: visible } : {}),
+                ...cards,
+              },
+              {
+                id: crypto.randomUUID(),
+                role: "system" as const,
+                text: `${next.harness} is not connected yet — install and sign in to that provider, then retry.`,
+              },
+            ],
+          };
+        }
+        if (pendingSwitch) {
+          const sealed = stopStreaming({
+            ...next,
+            title: titled,
+            pendingSwitch: undefined,
+          });
           return appendUser(
-            { ...next, title: titled },
+            appendPreparingHandoff(sealed, pendingSwitch.from, next.harness),
             visibleText,
             visible,
             cards,
           );
-        }),
-      );
+        }
+        return appendUser(
+          { ...next, title: titled },
+          visibleText,
+          visible,
+          cards,
+        );
+      });
+      sessionsRef.current = startedSessions;
+      syncDockBadge(startedSessions);
+      setSessions(startedSessions);
 
       if (isFirstTurn && live && placeholderTitle) {
         void generateHarnessTitle(current.harness, {
@@ -3670,6 +3724,13 @@ export default function App({
                 });
           const turnPrompt =
             intent === "plan" && !rawCommand ? planTurnPrompt(prompt) : prompt;
+          const delegatedPrompt = subagentsAllowedForTurn
+            ? buildSubagentDelegationPrompt({
+                text: turnPrompt,
+                profiles: loadSubagentProfiles(),
+                parent: current,
+              })
+            : turnPrompt;
           const earlier = queuedHandoff
             ? userMessagesAfterHandoff(current)
             : [];
@@ -3685,10 +3746,10 @@ export default function App({
               ? wrapHandoffPrompt(
                   wrap.text,
                   wrap.from,
-                  turnPrompt.trim() || CONTINUE_PROMPT,
+                  delegatedPrompt.trim() || CONTINUE_PROMPT,
                   earlier,
                 )
-              : turnPrompt,
+              : delegatedPrompt,
             attachments: prepared,
             onEvent: (event) => {
               if (turnGen.current.get(sessionId) !== gen) return;
@@ -3734,26 +3795,41 @@ export default function App({
           if (turnGen.current.get(sessionId) !== gen) return;
           flushHarnessEvents();
           await flushSessionCheckpoint(sessionId);
-          setSessions((prev) =>
-            prev.map((s) => {
-              if (s.id !== sessionId) return s;
-              const stopped = stopStreaming(s);
-              const providerFailed =
-                providerFailureSeen ||
-                isProviderFailureText(lastAssistantTextInTurn(stopped));
-              const finalized =
-                intent === "plan" && !nativePlanSeen && !providerFailed
-                  ? promoteLastAssistantToPlan(stopped, planEventKey)
-                  : stopped;
-              return approvedPlan && intent === "build"
-                ? withPlanStatus(
-                    finalized,
-                    approvedPlan.id,
-                    buildSucceeded && !providerFailed ? "built" : "ready",
-                  )
+          const finishedSessions = sessionsRef.current.map((s) => {
+            if (s.id !== sessionId) return s;
+            const stopped = stopStreaming(s);
+            const providerFailed =
+              providerFailureSeen ||
+              isProviderFailureText(lastAssistantTextInTurn(stopped));
+            const finalized =
+              intent === "plan" && !nativePlanSeen && !providerFailed
+                ? promoteLastAssistantToPlan(stopped, planEventKey)
+                : stopped;
+            const withSubagents =
+              subagentsAllowedForTurn && buildSucceeded && !providerFailed
+                ? consumeSubagentDelegations({
+                    session: finalized,
+                    profiles: loadSubagentProfiles(),
+                    makeId: () => crypto.randomUUID(),
+                    maxCallsPerRoot: SUBAGENT_MAX_CALLS_PER_ROOT,
+                  }).session
                 : finalized;
-            }),
-          );
+            return approvedPlan && intent === "build"
+              ? withPlanStatus(
+                  withSubagents,
+                  approvedPlan.id,
+                  buildSucceeded && !providerFailed ? "built" : "ready",
+                )
+              : withSubagents;
+          });
+          sessionsRef.current = finishedSessions;
+          syncDockBadge(finishedSessions);
+          setSessions(finishedSessions);
+          if (current.subagent && buildSucceeded) {
+            window.setTimeout(() => {
+              completeSubagentChildTurnRef.current(current.subagent!.callId);
+            }, 0);
+          }
           // Next tick: the flush above has rendered by then, so the banner
           // quotes the reply's final text rather than the previous batch.
           window.setTimeout(() => {
@@ -4031,6 +4107,333 @@ export default function App({
     [appendTab],
   );
 
+  const patchParentSubagentCall = useCallback(
+    (
+      parentSessionId: string,
+      callId: string,
+      patch: Parameters<typeof updateSubagentBlock>[2],
+    ) => {
+      const prev = sessionsRef.current;
+      const next = prev.map((session) =>
+        session.id === parentSessionId
+          ? updateSubagentBlock(session, callId, patch)
+          : session,
+      );
+      if (!next.some((session, index) => session !== prev[index])) return;
+      sessionsRef.current = next;
+      syncDockBadge(next);
+      setSessions(next);
+    },
+    [],
+  );
+
+  const placeSubagentSessionBeside = useCallback(
+    (parentSessionId: string, child: Session, cwd: string) => {
+      const tab = tabsRef.current.find((entry) =>
+        leafIds(entry.layout).includes(parentSessionId),
+      );
+      if (!tab) {
+        const nextTab = newTab(child.id);
+        appendTab(nextTab, cwd);
+        return;
+      }
+      if (leafIds(tab.layout).includes(child.id)) return;
+      const nextTabs = tabsRef.current.map((entry) =>
+        entry.id === tab.id
+          ? {
+              ...entry,
+              layout: splitPane(
+                entry.layout,
+                parentSessionId,
+                "right",
+                child.id,
+              ),
+              focusedId: parentSessionId,
+              diffFocused: false,
+            }
+          : entry,
+      );
+      tabsRef.current = nextTabs;
+      setTabs(nextTabs);
+      if (tab.id !== activeTabIdRef.current) setActiveTabId(tab.id);
+      setProjectTerminalFocused(false);
+    },
+    [appendTab],
+  );
+
+  const startQueuedSubagent = useCallback(
+    async (parentSessionId: string, callId: string) => {
+      const key = `${parentSessionId}:${callId}`;
+      if (subagentStartDispatching.current.has(key)) return;
+      subagentStartDispatching.current.add(key);
+      try {
+        const parent = sessionsRef.current.find(
+          (session) => session.id === parentSessionId,
+        );
+        const block = parent?.blocks.find(
+          (entry) =>
+            entry.role === "subagent" && entry.subagent?.callId === callId,
+        );
+        const meta = block?.subagent;
+        if (!parent || !block || !meta || meta.status !== "queued") return;
+        const profile = loadSubagentProfiles().find(
+          (entry) => entry.id === meta.profileId && entry.enabled,
+        );
+        if (!profile) {
+          patchParentSubagentCall(parentSessionId, callId, {
+            status: "failed",
+            finishedAt: Date.now(),
+            error: `Subagent "${meta.agent}" is not enabled.`,
+          });
+          return;
+        }
+
+        await probeHarnessAvailability();
+        let target = resolveSubagentTarget(profile, parent);
+        await refreshHarnessCatalogs([target.harness]).catch(() => undefined);
+        const latestParent = sessionsRef.current.find(
+          (session) => session.id === parentSessionId,
+        );
+        const latestBlock = latestParent?.blocks.find(
+          (entry) =>
+            entry.role === "subagent" && entry.subagent?.callId === callId,
+        );
+        if (
+          !latestParent ||
+          latestBlock?.subagent?.status !== "queued" ||
+          latestBlock.subagent.callId !== callId
+        ) {
+          return;
+        }
+        target = resolveSubagentTarget(profile, latestParent);
+        if (!isLiveHarness(target.harness) || !isHarnessAvailable(target.harness)) {
+          patchParentSubagentCall(parentSessionId, callId, {
+            status: "failed",
+            finishedAt: Date.now(),
+            harness: target.harness,
+            model: target.model,
+            title: `${profile.title} subagent`,
+            error: `${HARNESS_TITLE[target.harness]} is not available.`,
+          });
+          return;
+        }
+
+        const taskTitle = meta.task.replace(/\s+/g, " ").trim().slice(0, 64);
+        const title = `${profile.title}: ${taskTitle || "Delegated task"}`;
+        const child: Session = {
+          ...newSession(
+            target.harness,
+            sessionWorkCwd(latestParent),
+            target.model,
+            target.runtimeMode,
+            target.modelSettings,
+          ),
+          modelSettings: target.modelSettings,
+          title: formatSessionTitle(target.harness, title),
+          subagent: {
+            parentSessionId,
+            parentBlockId: block.id,
+            callId,
+            rootUserBlockId: meta.rootUserBlockId,
+            profileId: profile.id,
+            depth: (latestParent.subagent?.depth ?? 0) + 1,
+          },
+        };
+        const now = Date.now();
+        const prev = sessionsRef.current;
+        let parentUpdated = false;
+        const next = prev
+          .map((session) => {
+            if (session.id !== parentSessionId) return session;
+            parentUpdated = true;
+            return updateSubagentBlock(session, callId, {
+              status: "running",
+              childSessionId: child.id,
+              harness: target.harness,
+              model: target.model,
+              title: `${profile.title} subagent`,
+              startedAt: now,
+            });
+          })
+          .concat(prev.some((session) => session.id === child.id) ? [] : child);
+        if (!parentUpdated) return;
+        sessionsRef.current = next;
+        syncDockBadge(next);
+        setSessions(next);
+        try {
+          placeSubagentSessionBeside(parentSessionId, child, latestParent.cwd);
+          onSubmit(
+            child.id,
+            buildSubagentTaskPrompt({
+              profile,
+              task: meta.task,
+              parentTitle: sessionDisplayTitle(
+                latestParent.title,
+                latestParent.harness,
+              ),
+            }),
+            [],
+            { suppressSubagents: true },
+          );
+        } catch {
+          // Fall through to the dispatch check below, which fails the call.
+        }
+        // onSubmit has silent early returns (session gone, empty text,
+        // handoff in progress). A no-op dispatch writes no user block, and
+        // the completion watcher requires one — fail loudly instead of
+        // leaving the parent at running forever.
+        const dispatched = sessionsRef.current
+          .find((session) => session.id === child.id)
+          ?.blocks.some((block) => block.role === "user");
+        if (!dispatched) {
+          patchParentSubagentCall(parentSessionId, callId, {
+            status: "failed",
+            finishedAt: Date.now(),
+            error: "Subagent turn could not start.",
+          });
+        }
+      } catch {
+        // Anything unexpected (probe throw, layout throw) must not leave
+        // the call at running: the watcher would wait on it forever.
+        patchParentSubagentCall(parentSessionId, callId, {
+          status: "failed",
+          finishedAt: Date.now(),
+          error: "Subagent could not start.",
+        });
+      } finally {
+        subagentStartDispatching.current.delete(key);
+      }
+    },
+    [onSubmit, patchParentSubagentCall, placeSubagentSessionBeside],
+  );
+
+  useEffect(() => {
+    for (const parent of sessions) {
+      if (parent.subagent || parent.busy) continue;
+      if (
+        parent.blocks.some(
+          (block) =>
+            block.role === "subagent" &&
+            (block.subagent?.status === "running" ||
+              block.subagent?.status === "needs_input"),
+        )
+      ) {
+        continue;
+      }
+      const next = parent.blocks.find(
+        (block) =>
+          block.role === "subagent" && block.subagent?.status === "queued",
+      );
+      if (next?.subagent) {
+        // Swallow here: expected start failures are already recorded on the
+        // parent call as failed; this only silences unexpected throws.
+        void startQueuedSubagent(parent.id, next.subagent.callId).catch(
+          () => undefined,
+        );
+      }
+    }
+  }, [sessions, startQueuedSubagent]);
+
+  const completeSubagentChildTurn = useCallback(
+    (callId: string) => {
+      if (subagentResultDispatching.current.has(callId)) return;
+      const child = sessionsRef.current.find(
+        (session) => session.subagent?.callId === callId,
+      );
+      const childMeta = child?.subagent;
+      if (!child || !childMeta) return;
+      const parent = sessionsRef.current.find(
+        (session) => session.id === childMeta.parentSessionId,
+      );
+      const parentBlock = parent?.blocks.find(
+        (block) =>
+          block.role === "subagent" && block.subagent?.callId === callId,
+      );
+      const parentMeta = parentBlock?.subagent;
+      if (!parent || !parentBlock || !parentMeta) return;
+      if (parent.busy) return;
+      if (
+        parentMeta.status === "completed" ||
+        parentMeta.status === "failed" ||
+        parentMeta.status === "cancelled"
+      ) {
+        return;
+      }
+      const status = subagentStatusFromSession(child);
+      if (status === "running" || status === "needs_input") {
+        patchParentSubagentCall(parent.id, callId, { status });
+        return;
+      }
+
+      subagentResultDispatching.current.add(callId);
+      try {
+        const report = subagentSessionReport(child);
+        const files = turnEditedFiles(child.blocks, sessionWorkCwd(child));
+        const now = Date.now();
+        if (status === "failed") {
+          patchParentSubagentCall(parent.id, callId, {
+            status: "failed",
+            finishedAt: now,
+            error: "Subagent finished without a report.",
+          });
+          return;
+        }
+
+        const agentTitle = titleForAgent(parentMeta.agent);
+        patchParentSubagentCall(parent.id, callId, {
+          status: "completed",
+          finishedAt: now,
+          files,
+          resultPreview: report.replace(/\s+/g, " ").trim().slice(0, 500),
+        });
+        onSubmit(
+          parent.id,
+          buildSubagentResultPrompt({
+            agentTitle,
+            task: parentMeta.task,
+            report,
+            files,
+          }),
+          [],
+          {
+            displayText: `${agentTitle} subagent returned`,
+            subagentResult: {
+              callId,
+              rootUserBlockId: parentMeta.rootUserBlockId,
+              agent: parentMeta.agent,
+              childSessionId: child.id,
+            },
+          },
+        );
+      } finally {
+        subagentResultDispatching.current.delete(callId);
+      }
+    },
+    [onSubmit, patchParentSubagentCall],
+  );
+
+  useEffect(() => {
+    completeSubagentChildTurnRef.current = completeSubagentChildTurn;
+  }, [completeSubagentChildTurn]);
+
+  useEffect(() => {
+    for (const child of sessions) {
+      const meta = child.subagent;
+      if (!meta || subagentResultDispatching.current.has(meta.callId)) {
+        continue;
+      }
+      if (child.busy || sessionNeedsInput(child)) {
+        patchParentSubagentCall(meta.parentSessionId, meta.callId, {
+          status: child.busy ? "running" : "needs_input",
+        });
+        continue;
+      }
+      if (child.blocks.some((block) => block.role === "user")) {
+        completeSubagentChildTurn(meta.callId);
+      }
+    }
+  }, [completeSubagentChildTurn, patchParentSubagentCall, sessions]);
+
   const onSecondOpinion = useCallback(
     (sourceId: string, harness: HarnessId, turn: Block[], model: string) => {
       const source = sessionsRef.current.find(
@@ -4205,26 +4608,62 @@ export default function App({
 
   const onStop = useCallback(
     (sessionId: string) => {
-      const session = sessionsRef.current.find((s) => s.id === sessionId);
+      let session = sessionsRef.current.find((s) => s.id === sessionId);
       turnGen.current.set(sessionId, (turnGen.current.get(sessionId) ?? 0) + 1);
       flushHarnessEvents();
+      session = sessionsRef.current.find((s) => s.id === sessionId);
+      const now = Date.now();
+      const childMeta = session?.subagent;
+      const parentCancel = session
+        ? cancelActiveSubagentBlocks(session, now)
+        : { session: undefined, childSessionIds: [] };
+      const cancelledChildIds = new Set(parentCancel.childSessionIds);
       if (session) {
         for (const id of sessionChildHarnesses(session)) {
           void cancelHarnessTurn(id, sessionId);
         }
       }
-      setSessions((prev) =>
-        prev.map((s) => {
-          if (s.id !== sessionId) return s;
+      for (const childSessionId of parentCancel.childSessionIds) {
+        const child = sessionsRef.current.find(
+          (entry) => entry.id === childSessionId,
+        );
+        if (!child) continue;
+        turnGen.current.set(
+          child.id,
+          (turnGen.current.get(child.id) ?? 0) + 1,
+        );
+        void cancelHarnessTurn(child.harness, child.id);
+      }
+      const next = sessionsRef.current.map((s) => {
+        if (cancelledChildIds.has(s.id)) {
           const stopped = stopStreaming(s);
-          const completed = isPreparingHandoff(stopped)
-            ? completeHandoff(stopped, buildDeterministicHandoff(stopped))
+          return stopped.queuedMessages?.length
+            ? { ...stopped, queueStatus: "paused" as const }
             : stopped;
-          return completed.queuedMessages?.length
-            ? { ...completed, queueStatus: "paused" }
+        }
+        if (childMeta && s.id === childMeta.parentSessionId) {
+          return updateSubagentBlock(s, childMeta.callId, {
+            status: "cancelled",
+            finishedAt: now,
+            error: "Stopped by the user.",
+          });
+        }
+        if (s.id !== sessionId) return s;
+        const stopped = stopStreaming(s);
+        const completed = isPreparingHandoff(stopped)
+          ? completeHandoff(stopped, buildDeterministicHandoff(stopped))
+          : stopped;
+        const withCancelledSubagents =
+          parentCancel.session && parentCancel.session.id === completed.id
+            ? cancelActiveSubagentBlocks(completed, now).session
             : completed;
-        }),
-      );
+        return withCancelledSubagents.queuedMessages?.length
+          ? { ...withCancelledSubagents, queueStatus: "paused" as const }
+          : withCancelledSubagents;
+      });
+      sessionsRef.current = next;
+      syncDockBadge(next);
+      setSessions(next);
       if (session) {
         notifyReviewChanged(sessionId);
         nudgeWorkspace(sessionWorkCwd(session));
@@ -5167,6 +5606,7 @@ export default function App({
                           onApproval={onApproval}
                           onQuestionReply={onQuestionReply}
                           onOpenFile={onOpenFile}
+                          onOpenSession={onSelectHistorySession}
                           editorNavigation={editorNavigation}
                           onOpenDiff={onOpenDiff}
                           onOpenPlan={onOpenPlan}

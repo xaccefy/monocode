@@ -46,6 +46,7 @@ import { legacyTaskListFromText } from "../lib/taskList";
 import { displayPath, resolveWorkspacePath } from "../lib/paths";
 import { resolveModel } from "../lib/models";
 import { harnessForTurn } from "../lib/secondOpinion";
+import { subagentBlockPreview, titleForAgent } from "../lib/subagents";
 import { Shimmer } from "./Shimmer";
 import {
   hasPendingApproval,
@@ -102,6 +103,7 @@ type Props = {
   onAddToChat?: (text: string) => void;
   onSaveNote?: (text: string) => void;
   onOpenFile?: (path: string) => void;
+  onOpenSession?: (sessionId: string) => void;
   onOpenDiff?: (path: string) => void;
   onOpenPlan?: (blockId: string) => void;
   onBuildPlan?: (blockId: string, target?: PlanBuildTarget) => void;
@@ -124,6 +126,7 @@ export function AgentTranscript({
   onAddToChat,
   onSaveNote,
   onOpenFile,
+  onOpenSession,
   onOpenDiff,
   onOpenPlan,
   onBuildPlan,
@@ -387,6 +390,7 @@ export function AgentTranscript({
                     }
                     onApproval={onApproval}
                     onOpenFile={onOpenFile}
+                    onOpenSession={onOpenSession}
                     onOpenDiff={onOpenDiff}
                     onOpenPlan={onOpenPlan}
                     onBuildPlan={onBuildPlan}
@@ -691,6 +695,7 @@ const TranscriptBlock = memo(function TranscriptBlock({
   cwd,
   onApproval,
   onOpenFile,
+  onOpenSession,
   onOpenDiff,
   onOpenPlan,
   onBuildPlan,
@@ -705,6 +710,7 @@ const TranscriptBlock = memo(function TranscriptBlock({
   cwd?: string;
   onApproval?: (requestId: number, decision: ApprovalDecision) => void;
   onOpenFile?: (path: string) => void;
+  onOpenSession?: (sessionId: string) => void;
   onOpenDiff?: (path: string) => void;
   onOpenPlan?: (blockId: string) => void;
   onBuildPlan?: (blockId: string, target?: PlanBuildTarget) => void;
@@ -793,6 +799,10 @@ const TranscriptBlock = memo(function TranscriptBlock({
     return <HandoffDivider block={block} />;
   }
 
+  if (block.role === "subagent") {
+    return <SubagentCall block={block} onOpenSession={onOpenSession} />;
+  }
+
   if (block.role === "system") {
     return (
       <div className="px-4 py-2 text-content/50">
@@ -819,6 +829,96 @@ const TranscriptBlock = memo(function TranscriptBlock({
     </div>
   );
 });
+
+function SubagentCall({
+  block,
+  onOpenSession,
+}: {
+  block: Block;
+  onOpenSession?: (sessionId: string) => void;
+}) {
+  const meta = block.subagent;
+  if (!meta) return null;
+  const title = meta.title ?? `${titleForAgent(meta.agent)} subagent`;
+  const status = subagentStatusLabel(meta.status);
+  const preview = subagentBlockPreview(meta);
+  const tone =
+    meta.status === "failed"
+      ? "text-red-400"
+      : meta.status === "completed"
+        ? "text-content/70"
+        : "text-content/50";
+  const Icon =
+    meta.status === "completed"
+      ? Check
+      : meta.status === "failed" || meta.status === "cancelled"
+        ? X
+        : CircleDashed;
+  const content = (
+    <>
+      <div className="flex min-w-0 items-center gap-2">
+        <Bot className="size-3.5 shrink-0 text-content/45" strokeWidth={1.75} />
+        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-content/80">
+          {title}
+        </span>
+        {meta.harness ? (
+          <HarnessIcon harness={meta.harness} className="size-3.5 shrink-0" />
+        ) : null}
+        <span className={`shrink-0 text-[12px] ${tone}`}>{status}</span>
+        <Icon
+          className={`size-3.5 shrink-0 ${
+            meta.status === "running" || meta.status === "queued"
+              ? "zen-tool-spin text-content/40"
+              : meta.status === "failed" || meta.status === "cancelled"
+                ? "text-red-400"
+                : "text-content/45"
+          }`}
+          strokeWidth={1.75}
+        />
+      </div>
+      {preview ? (
+        <div className="mt-1 min-w-0 truncate text-[12px] text-content/40">
+          {preview}
+        </div>
+      ) : null}
+    </>
+  );
+
+  return (
+    <div className="px-4 py-1">
+      {meta.childSessionId && onOpenSession ? (
+        <button
+          type="button"
+          onClick={() => onOpenSession(meta.childSessionId!)}
+          className="w-full rounded-lg border border-content/10 bg-content/5 px-3 py-2 text-left hover:bg-content/8"
+        >
+          {content}
+        </button>
+      ) : (
+        <div className="rounded-lg border border-content/10 bg-content/5 px-3 py-2">
+          {content}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function subagentStatusLabel(status: NonNullable<Block["subagent"]>["status"]) {
+  switch (status) {
+    case "queued":
+      return "Queued";
+    case "running":
+      return "Running";
+    case "needs_input":
+      return "Needs input";
+    case "completed":
+      return "Completed";
+    case "failed":
+      return "Failed";
+    case "cancelled":
+      return "Cancelled";
+  }
+}
 
 function UserMessageBlock({
   block,

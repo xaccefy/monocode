@@ -21,6 +21,7 @@ type Props = {
   values: Record<string, string>;
   onChange: (settings: Record<string, string>) => void;
   onClose?: () => void;
+  hideOpenCodeAgent?: boolean;
 };
 
 const MENU_WIDTH = 220;
@@ -31,12 +32,14 @@ export function ModelSettings({
   values,
   onChange,
   onClose,
+  hideOpenCodeAgent = true,
 }: Props) {
   const catalog = useSyncCatalog();
   const settings = useMemo(() => {
     void catalog;
     const list = (resolveModel(harness, model).settings ?? []).filter(
-      (setting) => !(harness === "opencode" && setting.id === "agent"),
+      (setting) =>
+        !(hideOpenCodeAgent && harness === "opencode" && setting.id === "agent"),
     );
     const order = [
       "variant",
@@ -52,7 +55,7 @@ export function ModelSettings({
       const bi = order.indexOf(b.id);
       return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
     });
-  }, [catalog, harness, model]);
+  }, [catalog, harness, hideOpenCodeAgent, model]);
 
   if (settings.length === 0) return null;
 

@@ -10,6 +10,10 @@ import type {
   RuntimeMode,
   SecondOpinionMeta,
   Session,
+  SubagentBlockMeta,
+  SubagentCallStatus,
+  SubagentProfileId,
+  SubagentResultMeta,
   TaskListMeta,
   PlanBlockMeta,
 } from "./session";
@@ -360,6 +364,11 @@ function sanitizeBlock(block: Block): Block | null {
   else if (block.role === "handoff") return null;
   const secondOpinion = sanitizeSecondOpinion(block.secondOpinion);
   if (secondOpinion) next.secondOpinion = secondOpinion;
+  const subagent = sanitizeSubagent(block.subagent);
+  if (subagent) next.subagent = subagent;
+  else if (block.role === "subagent") return null;
+  const subagentResult = sanitizeSubagentResult(block.subagentResult);
+  if (subagentResult) next.subagentResult = subagentResult;
   const noteCard = sanitizeNoteCard(block.noteCard);
   if (noteCard) next.noteCard = noteCard;
   return next;
@@ -536,6 +545,137 @@ function sanitizeSecondOpinion(
     ...(request ? { request } : {}),
     ...(files > 0 ? { files } : {}),
     ...(value.kind === "handoff" ? { kind: "handoff" as const } : {}),
+  };
+}
+
+const SUBAGENT_PROFILE_IDS: SubagentProfileId[] = [
+  "researcher",
+  "builder",
+  "reviewer",
+];
+const SUBAGENT_STATUSES: SubagentCallStatus[] = [
+  "queued",
+  "running",
+  "needs_input",
+  "completed",
+  "failed",
+  "cancelled",
+];
+
+function sanitizeSubagent(
+  value: Block["subagent"],
+): SubagentBlockMeta | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const callId = typeof value.callId === "string" ? value.callId.trim() : "";
+  const rootUserBlockId =
+    typeof value.rootUserBlockId === "string"
+      ? value.rootUserBlockId.trim()
+      : "";
+  const agent = typeof value.agent === "string" ? value.agent.trim() : "";
+  const task = typeof value.task === "string" ? value.task.trim() : "";
+  if (!callId || !rootUserBlockId || !agent) return undefined;
+  if (!isPersistableId(callId) || !isPersistableId(rootUserBlockId)) {
+    return undefined;
+  }
+  const profileId = SUBAGENT_PROFILE_IDS.includes(value.profileId as never)
+    ? value.profileId
+    : undefined;
+  const status = SUBAGENT_STATUSES.includes(value.status as never)
+    ? value.status
+    : "failed";
+  const persistedStatus =
+    status === "queued" || status === "running" || status === "needs_input"
+      ? "cancelled"
+      : status;
+  const requestedAt =
+    typeof value.requestedAt === "number" && Number.isFinite(value.requestedAt)
+      ? value.requestedAt
+      : Date.now();
+  const startedAt =
+    typeof value.startedAt === "number" && Number.isFinite(value.startedAt)
+      ? value.startedAt
+      : undefined;
+  const finishedAt =
+    typeof value.finishedAt === "number" && Number.isFinite(value.finishedAt)
+      ? value.finishedAt
+      : persistedStatus === status
+        ? undefined
+        : Date.now();
+  const childSessionId =
+    typeof value.childSessionId === "string" &&
+    isPersistableId(value.childSessionId.trim())
+      ? value.childSessionId.trim()
+      : "";
+  const harness =
+    value.harness && (HARNESSES as string[]).includes(value.harness)
+      ? value.harness
+      : undefined;
+  const model = typeof value.model === "string" ? value.model.trim() : "";
+  const title = typeof value.title === "string" ? value.title.trim() : "";
+  const error = typeof value.error === "string" ? value.error.trim() : "";
+  const resultPreview =
+    typeof value.resultPreview === "string" ? value.resultPreview.trim() : "";
+  const files = Array.isArray(value.files)
+    ? value.files
+        .filter((file): file is string => typeof file === "string")
+        .map((file) => file.trim())
+        .filter(Boolean)
+        .slice(0, 40)
+    : [];
+  return {
+    callId,
+    rootUserBlockId,
+    agent: agent.slice(0, 80),
+    ...(profileId ? { profileId } : {}),
+    task: task.slice(0, 6_000),
+    status: persistedStatus,
+    requestedAt,
+    ...(startedAt != null ? { startedAt } : {}),
+    ...(finishedAt != null ? { finishedAt } : {}),
+    ...(childSessionId ? { childSessionId } : {}),
+    ...(harness ? { harness } : {}),
+    ...(model ? { model } : {}),
+    ...(title ? { title: title.slice(0, 160) } : {}),
+    ...(error
+      ? { error: error.slice(0, 500) }
+      : persistedStatus !== status
+        ? { error: "Interrupted before subagent completed." }
+        : {}),
+    ...(files.length > 0 ? { files } : {}),
+    ...(resultPreview ? { resultPreview: resultPreview.slice(0, 500) } : {}),
+  };
+}
+
+function sanitizeSubagentResult(
+  value: Block["subagentResult"],
+): SubagentResultMeta | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const callId = typeof value.callId === "string" ? value.callId.trim() : "";
+  const rootUserBlockId =
+    typeof value.rootUserBlockId === "string"
+      ? value.rootUserBlockId.trim()
+      : "";
+  const agent = typeof value.agent === "string" ? value.agent.trim() : "";
+  const childSessionId =
+    typeof value.childSessionId === "string"
+      ? value.childSessionId.trim()
+      : "";
+  if (
+    !callId ||
+    !rootUserBlockId ||
+    !agent ||
+    !childSessionId ||
+    !isPersistableId(callId) ||
+    !isPersistableId(rootUserBlockId) ||
+    !isPersistableId(childSessionId)
+  ) {
+    return undefined;
+  }
+  return {
+    callId,
+    rootUserBlockId,
+    agent: agent.slice(0, 80),
+    childSessionId,
   };
 }
 

@@ -92,6 +92,7 @@ type Shared = {
     reply: UserQuestionReply,
   ) => void;
   onOpenFile: (path: string) => void;
+  onOpenSession?: (sessionId: string) => void;
   editorNavigation?: EditorNavigationTarget | null;
   onOpenDiff: (
     path?: string,
@@ -170,6 +171,7 @@ function PaneTreeComponent({
   onApproval,
   onQuestionReply,
   onOpenFile,
+  onOpenSession,
   editorNavigation,
   onOpenDiff,
   onOpenPlan,
@@ -375,6 +377,7 @@ function PaneTreeComponent({
                 onApproval={onApproval}
                 onQuestionReply={onQuestionReply}
                 onOpenFile={onOpenFile}
+                onOpenSession={onOpenSession}
                 onOpenDiff={onOpenDiff}
                 onOpenPlan={onOpenPlan}
                 onBuildPlan={onBuildPlan}

@@ -33,7 +33,8 @@ export type BlockRole =
   | "tasks"
   | "plan"
   | "system"
-  | "handoff";
+  | "handoff"
+  | "subagent";
 
 export type TaskListItemStatus =
   "pending" | "in_progress" | "completed" | "cancelled";
@@ -54,6 +55,51 @@ export type TaskListMeta = {
 
 /** One-shot behavior selected in the composer for the next harness turn. */
 export type TurnIntent = "default" | "plan" | "build";
+
+export type SubagentProfileId = "researcher" | "builder" | "reviewer";
+
+export type SubagentCallStatus =
+  | "queued"
+  | "running"
+  | "needs_input"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export type SubagentBlockMeta = {
+  callId: string;
+  rootUserBlockId: string;
+  agent: string;
+  profileId?: SubagentProfileId;
+  task: string;
+  status: SubagentCallStatus;
+  requestedAt: number;
+  startedAt?: number;
+  finishedAt?: number;
+  childSessionId?: string;
+  harness?: HarnessId;
+  model?: string;
+  title?: string;
+  error?: string;
+  files?: string[];
+  resultPreview?: string;
+};
+
+export type SubagentResultMeta = {
+  callId: string;
+  rootUserBlockId: string;
+  agent: string;
+  childSessionId: string;
+};
+
+export type SubagentSessionMeta = {
+  parentSessionId: string;
+  parentBlockId: string;
+  callId: string;
+  rootUserBlockId: string;
+  profileId: SubagentProfileId;
+  depth: number;
+};
 
 export type PlanStatus = "streaming" | "ready" | "building" | "built";
 
@@ -169,6 +215,8 @@ export type Block = {
   plan?: PlanBlockMeta;
   handoff?: HandoffMeta;
   secondOpinion?: SecondOpinionMeta;
+  subagent?: SubagentBlockMeta;
+  subagentResult?: SubagentResultMeta;
   /** Note chip shown on this user turn. Body is not stored; the harness already received it. */
   noteCard?: NoteCardMeta;
 };
@@ -246,6 +294,8 @@ export type Session = {
    * In-memory; request ids do not survive restarts.
    */
   pendingQuestion?: UserQuestionPrompt;
+  /** In-memory marker for sessions spawned by MonoCode's default subagent layer. */
+  subagent?: SubagentSessionMeta;
 };
 
 export type PendingHarnessSwitch = {

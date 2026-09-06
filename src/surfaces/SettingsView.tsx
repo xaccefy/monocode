@@ -14,6 +14,7 @@ import {
 } from "react";
 import { HarnessIcon } from "../chrome/HarnessIcon";
 import { InboxProviderMark } from "../chrome/InboxProviderMark";
+import { ModelSettings } from "../chrome/ModelSettings";
 import { RemoveProjectDialog } from "../chrome/RemoveProjectDialog";
 import { useLockOverscroll } from "../hooks/useLockOverscroll";
 import {
@@ -74,7 +75,9 @@ import {
 } from "../lib/harness/availability";
 import { refreshHarnessCatalogs } from "../lib/harness/registry";
 import {
+  allModels,
   defaultModelId,
+  findModel,
   getModelSnapshot,
   isPickerProviderVisible,
   loadDefaultModels,
@@ -124,14 +127,12 @@ import {
   loadComposerRunner,
   loadDiffViewer,
   loadFollowUpBehavior,
-  loadGridArcadeEnabled,
   loadLiveAgentsEnabled,
   loadNotesEnabled,
   saveClaudeHooks,
   saveComposerRunner,
   saveDiffViewer,
   saveFollowUpBehavior,
-  saveGridArcadeEnabled,
   saveLiveAgentsEnabled,
   saveNotesEnabled,
   settingsSectionDescription,
@@ -140,6 +141,15 @@ import {
   type FollowUpBehavior,
   type SettingsSectionId,
 } from "../lib/settings";
+import {
+  DEFAULT_SUBAGENT_PROFILES,
+  fixedSubagentTarget,
+  loadSubagentProfiles,
+  subagentTargetLabel,
+  subscribeSubagentProfiles,
+  updateSubagentProfile,
+  type SubagentProfile,
+} from "../lib/subagents";
 import { loadSoundsEnabled, playCue, saveSoundsEnabled } from "../lib/sounds";
 import {
   cachedNotificationPermission,
@@ -244,6 +254,7 @@ export function SettingsView({
           ) : null}
           {section === "keybindings" ? <KeybindingsPage /> : null}
           {section === "providers" ? <ProvidersPage /> : null}
+          {section === "subagents" ? <SubagentsPage /> : null}
           {section === "archive" ? (
             <ArchivePage
               cwd={cwd}
@@ -274,9 +285,6 @@ function GeneralPage({
   const [followUpBehavior, setFollowUpBehavior] =
     useState<FollowUpBehavior>(loadFollowUpBehavior);
   const [composerRunner, setComposerRunner] = useState(loadComposerRunner);
-  const [gridArcadeEnabled, setGridArcadeEnabled] = useState(
-    loadGridArcadeEnabled,
-  );
   const [notesEnabled, setNotesEnabled] = useState(loadNotesEnabled);
   const [liveAgentsEnabled, setLiveAgentsEnabled] = useState(
     loadLiveAgentsEnabled,
@@ -334,11 +342,6 @@ function GeneralPage({
   const onComposerRunner = (next: boolean) => {
     saveComposerRunner(next);
     setComposerRunner(next);
-  };
-
-  const onGridArcadeEnabled = (next: boolean) => {
-    saveGridArcadeEnabled(next);
-    setGridArcadeEnabled(next);
   };
 
   const onNotesEnabled = (next: boolean) => {
@@ -430,16 +433,6 @@ function GeneralPage({
           label="Composer mascot"
           on={composerRunner}
           onChange={onComposerRunner}
-        />
-      </Row>
-      <Row
-        label="Empty session games"
-        description="Pac-man and snake idle on the empty-session grid. Hover the band to take control of whichever is on screen. Turn this off to keep the pane still."
-      >
-        <Toggle
-          label="Empty session games"
-          on={gridArcadeEnabled}
-          onChange={onGridArcadeEnabled}
         />
       </Row>
       <Row
@@ -995,6 +988,144 @@ function ProvidersPage() {
         />
       ))}
     </>
+  );
+}
+
+function SubagentsPage() {
+  useSyncExternalStore(subscribeModels, getModelSnapshot, getModelSnapshot);
+  useSyncExternalStore(
+    subscribeHarnessAvailability,
+    getHarnessAvailabilitySnapshot,
+    getHarnessAvailabilitySnapshot,
+  );
+  const [profiles, setProfiles] = useState(loadSubagentProfiles);
+
+  useEffect(
+    () => subscribeSubagentProfiles(() => setProfiles(loadSubagentProfiles())),
+    [],
+  );
+
+  useEffect(() => {
+    void probeHarnessAvailability().then(() => {
+      const available = HARNESSES.filter(isHarnessAvailable);
+      if (available.length > 0) void refreshHarnessCatalogs(available);
+    });
+  }, []);
+
+  const commitProfile = (next: SubagentProfile) => {
+    setProfiles((prev) =>
+      prev.map((profile) => (profile.id === next.id ? next : profile)),
+    );
+    updateSubagentProfile(next);
+  };
+
+  return (
+    <>
+      <p className="pb-2 text-[12px] leading-relaxed text-content/45">
+        These default subagents are available to every model MonoCode drives.
+        Each one can inherit the parent model or target a specific provider,
+        model, and model setting.
+      </p>
+      {DEFAULT_SUBAGENT_PROFILES.map((definition) => {
+        const profile =
+          profiles.find((entry) => entry.id === definition.id) ?? definition;
+        return (
+          <SubagentProfileRow
+            key={definition.id}
+            profile={profile}
+            onChange={commitProfile}
+          />
+        );
+      })}
+    </>
+  );
+}
+
+function SubagentProfileRow({
+  profile,
+  onChange,
+}: {
+  profile: SubagentProfile;
+  onChange: (profile: SubagentProfile) => void;
+}) {
+  const knownModels = allModels();
+  const targetValue =
+    profile.target.kind === "inherit" ? "inherit" : profile.target.model;
+  const targetOptions = [
+    { value: "inherit", label: "Inherit parent model" },
+    ...knownModels.map((model) => ({
+      value: model.id,
+      label: `${HARNESS_TITLE[model.harness]} / ${model.name}`,
+    })),
+  ];
+  const fixedTarget =
+    profile.target.kind === "fixed" ? profile.target : undefined;
+  if (
+    fixedTarget &&
+    !targetOptions.some((option) => option.value === fixedTarget.model)
+  ) {
+    targetOptions.push({
+      value: fixedTarget.model,
+      label: fixedTarget.model,
+    });
+  }
+
+  const onTargetChange = (value: string) => {
+    if (value === "inherit") {
+      onChange({ ...profile, target: { kind: "inherit" } });
+      return;
+    }
+    const model = findModel(value);
+    if (!model) return;
+    onChange({ ...profile, target: fixedSubagentTarget(model) });
+  };
+
+  const onSettingsChange = (settings: Record<string, string>) => {
+    if (profile.target.kind !== "fixed") return;
+    onChange({
+      ...profile,
+      target: {
+        ...profile.target,
+        modelSettings: settings,
+      },
+    });
+  };
+
+  return (
+    <Row
+      label={
+        <span className="flex items-center gap-2">
+          {profile.title}
+          {profile.enabled ? (
+            <span className="rounded-full bg-content/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-content/60">
+              On
+            </span>
+          ) : null}
+        </span>
+      }
+      description={`${profile.description} Current target: ${subagentTargetLabel(profile)}.`}
+    >
+      <Toggle
+        label={`${profile.title} subagent`}
+        on={profile.enabled}
+        onChange={(enabled) => onChange({ ...profile, enabled })}
+      />
+      <Select
+        label={`${profile.title} target`}
+        value={targetValue}
+        onChange={onTargetChange}
+        options={targetOptions}
+      />
+      {profile.target.kind === "fixed" ? (
+        <ModelSettings
+          harness={profile.target.harness}
+          model={profile.target.model}
+          values={profile.target.modelSettings}
+          onChange={onSettingsChange}
+          hideOpenCodeAgent={false}
+        />
+      ) : null}
+    </Row>
   );
 }
 

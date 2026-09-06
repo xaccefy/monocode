@@ -85,6 +85,86 @@ describe("sanitizeSessionForPersist", () => {
     });
   });
 
+  it("keeps completed subagent call and result metadata", () => {
+    const session = newSession("codex", "/tmp/project");
+    session.blocks = [
+      { id: "u1", role: "user", text: "fix auth" },
+      {
+        id: "s1",
+        role: "subagent",
+        text: "Reviewer subagent",
+        subagent: {
+          callId: "call_1",
+          rootUserBlockId: "u1",
+          agent: "reviewer",
+          profileId: "reviewer",
+          task: "review auth",
+          status: "completed",
+          requestedAt: 1,
+          startedAt: 2,
+          finishedAt: 3,
+          childSessionId: "child_1",
+          harness: "opencode",
+          model: "opencode:muse-1.3",
+          title: "Reviewer subagent",
+          files: ["src/App.tsx"],
+          resultPreview: "Looks good.",
+        },
+      },
+      {
+        id: "u2",
+        role: "user",
+        text: "Reviewer subagent returned",
+        subagentResult: {
+          callId: "call_1",
+          rootUserBlockId: "u1",
+          agent: "reviewer",
+          childSessionId: "child_1",
+        },
+      },
+    ];
+
+    expect(sanitizeSessionForPersist(session).blocks).toEqual(session.blocks);
+  });
+
+  it("settles active subagent calls before persisting history", () => {
+    const session = newSession("codex", "/tmp/project");
+    session.blocks = [
+      { id: "u1", role: "user", text: "fix auth" },
+      {
+        id: "s1",
+        role: "subagent",
+        text: "Reviewer subagent",
+        subagent: {
+          callId: "call_1",
+          rootUserBlockId: "u1",
+          agent: "reviewer",
+          profileId: "reviewer",
+          task: "review auth",
+          status: "running",
+          requestedAt: 1,
+          startedAt: 2,
+          childSessionId: "child_1",
+        },
+      },
+    ];
+
+    const persisted = sanitizeSessionForPersist(session).blocks[1];
+    expect(persisted.subagent).toMatchObject({
+      callId: "call_1",
+      rootUserBlockId: "u1",
+      agent: "reviewer",
+      profileId: "reviewer",
+      task: "review auth",
+      status: "cancelled",
+      requestedAt: 1,
+      startedAt: 2,
+      childSessionId: "child_1",
+      error: "Interrupted before subagent completed.",
+    });
+    expect(typeof persisted.subagent?.finishedAt).toBe("number");
+  });
+
   it("keeps a handoff card kind on the user turn", () => {
     const session = newSession("codex", "/tmp/project");
     session.blocks = [

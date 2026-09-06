@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   Bot,
   Keyboard,
+  MessageMultiple,
   Palette,
   SlidersHorizontal,
   type IconComponent,
@@ -18,6 +19,7 @@ const SECTION_ICONS: Record<SettingsSectionId, IconComponent> = {
   appearance: Palette,
   keybindings: Keyboard,
   providers: Bot,
+  subagents: MessageMultiple,
   archive: Archive,
 };
 

@@ -1,12 +1,7 @@
-import { type ReactNode, useSyncExternalStore } from "react";
+import { type ReactNode } from "react";
 import { basename } from "../lib/fs";
 import { looksLikeProject } from "../lib/recents";
-import {
-  loadGridArcadeEnabled,
-  subscribeGridArcadeEnabled,
-} from "../lib/settings";
 import { useLockOverscroll } from "../hooks/useLockOverscroll";
-import { TerminalGridBackground } from "./TerminalGridBackground";
 
 type Props = {
   cwd: string;
@@ -15,11 +10,6 @@ type Props = {
 
 export function EmptySession({ cwd, composer }: Props) {
   const lockOverscroll = useLockOverscroll<HTMLDivElement>();
-  const arcadeEnabled = useSyncExternalStore(
-    subscribeGridArcadeEnabled,
-    loadGridArcadeEnabled,
-    () => true,
-  );
   const project = looksLikeProject(cwd) ? basename(cwd) : null;
   const title = project
     ? `What should we work on in ${project}?`
@@ -30,7 +20,6 @@ export function EmptySession({ cwd, composer }: Props) {
       ref={lockOverscroll}
       className="relative flex h-full min-h-0 overflow-y-auto overscroll-none"
     >
-      {arcadeEnabled ? <TerminalGridBackground /> : null}
       {composer ? (
         <div className="pointer-events-none relative z-10 mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center px-6 py-12">
           <div className="pointer-events-auto mb-4 px-2.5">

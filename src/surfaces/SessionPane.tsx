@@ -38,9 +38,6 @@ import {
 } from "../lib/quoteDraft";
 import { createNote, noteTitle } from "../lib/notes";
 import { loadNotesEnabled, subscribeNotesEnabled } from "../lib/settings";
-import { resolveModel } from "../lib/models";
-import { isAstraModel } from "../lib/astraWelcome";
-import { AstraWelcome } from "./AstraWelcome";
 
 type Props = {
   session: Session;
@@ -93,6 +90,7 @@ type Props = {
     reply: UserQuestionReply,
   ) => void;
   onOpenFile: (path: string) => void;
+  onOpenSession?: (sessionId: string) => void;
   onOpenDiff: (
     path?: string,
     session?: { sessionId: string; cwd: string },
@@ -150,6 +148,7 @@ export const SessionPane = memo(function SessionPane({
   onApproval,
   onQuestionReply,
   onOpenFile,
+  onOpenSession,
   onOpenDiff,
   onOpenPlan,
   onBuildPlan,
@@ -181,12 +180,6 @@ export const SessionPane = memo(function SessionPane({
   const jumpToBottomRef = useRef<(() => void) | null>(null);
   const quoteRequestId = useRef(0);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
-  const astraWelcomeSequence = useRef(0);
-  const [astraWelcomeRun, setAstraWelcomeRun] = useState<number | null>(null);
-  const dismissAstraWelcome = useCallback(() => setAstraWelcomeRun(null), []);
-  useEffect(() => {
-    if (!visible) setAstraWelcomeRun(null);
-  }, [visible]);
   const [quoteRequest, setQuoteRequest] = useState<QuoteRequest>();
   const onJumpToBottomReady = useCallback((jump: () => void) => {
     jumpToBottomRef.current = jump;
@@ -279,11 +272,6 @@ export const SessionPane = memo(function SessionPane({
       onNewTerminal={() => onNewTerminal(session.id)}
       onModelChange={(harness, model) => {
         onModelChange(session.id, harness, model);
-        const selected = resolveModel(harness, model);
-        // A new key restarts the animation and its cleanup timer on every pick.
-        setAstraWelcomeRun(
-          isAstraModel(selected) ? ++astraWelcomeSequence.current : null,
-        );
       }}
       onModelSettingsChange={(settings) =>
         onModelSettingsChange(session.id, settings)
@@ -329,9 +317,6 @@ export const SessionPane = memo(function SessionPane({
       className="relative isolate flex h-full min-h-0 min-w-0 flex-1 flex-col"
       onMouseDown={() => onFocus(session.id)}
     >
-      {astraWelcomeRun !== null && visible ? (
-        <AstraWelcome key={astraWelcomeRun} onDone={dismissAstraWelcome} />
-      ) : null}
       {inSplit ? (
         <div
           className={`flex h-9 shrink-0 touch-none items-center gap-1.5 border-b border-content/10 px-2 select-none ${
@@ -399,6 +384,7 @@ export const SessionPane = memo(function SessionPane({
               onAddToChat={addSelectionToChat}
               onSaveNote={notesEnabled ? saveNote : undefined}
               onOpenFile={onOpenFile}
+              onOpenSession={onOpenSession}
               onOpenDiff={onOpenDiff}
               onOpenPlan={openPlan}
               onBuildPlan={buildPlan}
