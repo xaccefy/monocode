@@ -1,6 +1,7 @@
 use tauri::Manager;
 
 mod checkpoint;
+mod clipboard;
 mod cursor_store;
 mod fs;
 mod harness;
@@ -195,6 +196,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             default_cwd,
             home_dir,
+            clipboard::clipboard_image,
             notifications::notification_permission,
             notifications::request_notification_permission,
             notifications::show_notification,

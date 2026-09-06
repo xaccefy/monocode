@@ -27,6 +27,7 @@ import {
   type ReactNode,
 } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { readNativeClipboardImage } from "../lib/nativeClipboard";
 import {
   attachmentsFromFiles,
   attachmentsFromPaths,
@@ -1032,10 +1033,20 @@ export function Composer({
 
   const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
     const files = filesFromClipboard(e.clipboardData);
-    if (files.length === 0) return;
-    e.preventDefault();
+    if (files.length > 0) {
+      e.preventDefault();
+      if (!attachmentsSupported) return;
+      void attachmentsFromFiles(files).then(addAttachments);
+      return;
+    }
+    // Text paste: leave alone. Empty paste with no files is usually an image
+    // WebKit on Wayland refused to expose, so ask the native side once.
+    if (e.clipboardData?.getData("text")) return;
     if (!attachmentsSupported) return;
-    void attachmentsFromFiles(files).then(addAttachments);
+    e.preventDefault();
+    void readNativeClipboardImage().then((file) => {
+      if (file) void attachmentsFromFiles([file]).then(addAttachments);
+    });
   };
 
   const attachFromPicker = () => {
